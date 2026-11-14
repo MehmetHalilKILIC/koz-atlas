@@ -336,15 +336,38 @@ with tab1:
 with tab2:
     c_map, c_proof = st.columns([1.35, 1])
     with c_map:
-        m = folium.Map(location=[37.88, 41.15], zoom_start=8, tiles="CartoDB dark_matter")
+        m = folium.Map(location=[37.88, 41.15], zoom_start=8, tiles=None)
+        
+        # 1. Katman: Ücretsiz, API Key İstemeyen Yüksek Çözünürlüklü Uydu Haritası
+        folium.TileLayer(
+            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            attr="Esri World Imagery",
+            name="🛰️ Uydu Görüntüsü (Yüksek Çözünürlük)",
+            max_zoom=18
+        ).add_to(m)
+
+        # 2. Katman: Ücretsiz OpenStreetMap (İl/İlçe ve Yol İsimleri)
+        folium.TileLayer(
+            tiles="OpenStreetMap",
+            name="🗺️ Sokak ve İlçe Haritası (OSM)",
+            max_zoom=19
+        ).add_to(m)
+
+        # 3. Katman: NASA EOSDIS GIBS (Zoom 9'a kadar gerçek zamanlı uydu yansıması)
         folium.TileLayer(
             tiles="https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/2026-11-01/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg",
-            attr="NASA EOSDIS GIBS", name="NASA GIBS TrueColor"
+            attr="NASA EOSDIS GIBS",
+            name="🔥 NASA GIBS TrueColor (Zoom ≤ 9)",
+            max_native_zoom=9,
+            max_zoom=18,
+            overlay=True,
+            show=False
         ).add_to(m)
+
         if not pairs_df.empty:
             for _, r in pairs_df.tail(120).iterrows():
                 folium.CircleMarker(
-                    location=[r["latitude"], r["longitude"]], radius=6, color="#22c55e", fill=True, fill_opacity=0.85,
+                    location=[r["latitude"], r["longitude"]], radius=7, color="#22c55e", fill=True, fill_color="#22c55e", fill_opacity=0.9,
                     popup=f"<b>EŞLEŞEN GEÇİŞ</b><br>Tarih: {r['date_str']}<br>Aqua FRP: {r['aqua_frp']:.1f} MW<br>VIIRS Toplam FRP: {r['viirs_frp_sum']:.1f} MW<br>Zaman Farkı: {r['median_time_diff_min']:.1f} dk"
                 ).add_to(m)
         else:
@@ -352,6 +375,8 @@ with tab2:
                 folium.CircleMarker(location=[r["latitude"], r["longitude"]], radius=5, color="#38bdf8", fill=True, popup=f"MODIS Ham: {r['frp']} MW ({r['date_str']})").add_to(m)
             for _, r in viirs_df.tail(80).iterrows():
                 folium.CircleMarker(location=[r["latitude"], r["longitude"]], radius=4, color="#f97316", fill=True, popup=f"VIIRS Ham: {r['frp']} MW ({r['date_str']})").add_to(m)
+
+        folium.LayerControl(position="topright").add_to(m)
         st_folium(m, width=680, height=430)
 
     with c_proof:
