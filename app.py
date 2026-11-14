@@ -98,24 +98,59 @@ with tab1:
         ["Tüm Ham MODIS + VIIRS Gözlemleri (MW)", "Eşleşen Aqua MODIS FRP (MW)", "Kalibre Edilmiş VIIRS -> MODIS Ölçeği (MW)"],
         horizontal=True
     )
+
+    ay_isimleri = {
+        1: "Oca", 2: "Şub", 3: "Mar", 4: "Nis", 5: "May", 6: "Haz",
+        7: "Tem", 8: "Ağu", 9: "Eyl", 10: "Eki", 11: "Kas", 12: "Ara"
+    }
+
+    def render_modern_calendar(df_src, val_col, title_text):
+        piv = df_src.groupby(["year", "month"])[val_col].sum().unstack(fill_value=0)
+        # 1'den 12'ye tüm ayların eksiksiz görünmesini sağla
+        for m_idx in range(1, 13):
+            if m_idx not in piv.columns:
+                piv[m_idx] = 0.0
+        piv = piv[sorted(piv.columns)]
+        piv.columns = [ay_isimleri[m] for m in piv.columns]
+        piv.index = piv.index.astype(str)
+
+        fig = px.imshow(
+            piv,
+            text_auto=".0f",  # Kutuların içine tam sayı olarak FRP değerini yazar
+            labels=dict(x="Ay", y="Yıl", color="FRP (MW)"),
+            color_continuous_scale=["#161b22", "#3b1d14", "#8c2d04", "#d94801", "#f16913", "#fdd0a2"],
+            aspect="auto",
+            title=title_text
+        )
+        fig.update_traces(
+            xgap=4,  # Kutular arasına modern boşluk ekler
+            ygap=4,
+            hovertemplate="<b>Yıl:</b> %{y}<br><b>Ay:</b> %{x}<br><b>Toplam FRP:</b> %{z:.1f} MW<extra></extra>"
+        )
+        fig.update_layout(
+            plot_bgcolor="#0e1117",
+            paper_bgcolor="#0e1117",
+            font=dict(color="#e6edf3", size=13),
+            xaxis=dict(side="top", tickmode="linear"),
+            yaxis=dict(tickmode="linear"),
+            height=420,
+            margin=dict(l=40, r=40, t=70, b=30)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
     if scale_choice == "Tüm Ham MODIS + VIIRS Gözlemleri (MW)":
         comb_raw = pd.concat([modis_df[["year", "month", "frp"]], viirs_df[["year", "month", "frp"]]], ignore_index=True)
         if not comb_raw.empty:
-            piv = comb_raw.groupby(["year", "month"])["frp"].sum().unstack(fill_value=0)
-            fig = px.imshow(piv, labels=dict(x="Ay", y="Yıl", color="Ham Toplam FRP (MW)"), color_continuous_scale="YlOrRd", aspect="auto")
-            st.plotly_chart(fig, use_container_width=True)
+            render_modern_calendar(comb_raw, "frp", "🔥 Yıllık ve Aylık Yanma Aktivitesi Yoğunluğu (Ham Toplam FRP - MW)")
     elif not pairs_df.empty:
         if model is not None:
             pairs_df["calibrated_frp"] = np.expm1(model.predict(np.log1p(pairs_df[["viirs_frp_sum"]].values)))
         else:
             pairs_df["calibrated_frp"] = pairs_df["viirs_frp_sum"]
         col_name = "aqua_frp" if "Aqua" in scale_choice else "calibrated_frp"
-        piv = pairs_df.groupby(["year", "month"])[col_name].sum().unstack(fill_value=0)
-        fig = px.imshow(piv, labels=dict(x="Ay", y="Yıl", color="Toplam FRP (MW)"), color_continuous_scale="YlOrRd", aspect="auto")
-        st.plotly_chart(fig, use_container_width=True)
+        render_modern_calendar(pairs_df, col_name, f"🛰️ {scale_choice}")
     else:
         st.warning("Eşleşen geçiş bulunamadı. Lütfen iki kutuya da AYNI YILIN MODIS ve VIIRS dosyalarını yüklediğinizden emin olun.")
-
 with tab2:
     c_map, c_proof = st.columns([1.3, 1])
     with c_map:
