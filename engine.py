@@ -54,7 +54,7 @@ def haversine_km(lat1, lon1, lat2, lon2):
     a = np.sin(dphi / 2.0) ** 2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlambda / 2.0) ** 2
     return 2.0 * r * np.arcsin(np.sqrt(a))
 
-def match_aqua_and_viirs(modis_df, viirs_df, max_dist_km=2.0, max_time_min=180.0, include_terra=False):
+def match_aqua_and_viirs(modis_df, viirs_df, max_dist_km=2.0, max_time_min=120.0, include_terra=False):
     if modis_df.empty or viirs_df.empty:
         return pd.DataFrame(), {"status": "Veri setlerinden biri bos."}
 
@@ -123,11 +123,54 @@ def match_aqua_and_viirs(modis_df, viirs_df, max_dist_km=2.0, max_time_min=180.0
         "matched_aqua_events": len(pairs),
         "matched_viirs_unique_pixels": len(matched_viirs_unique),
         "aqua_codetection_pct": round(len(pairs) / max(len(target_modis), 1) * 100, 1),
-        "viirs_codetection_pct": round(len(matched_viirs_unique) / max(len(viirs_df), 1) * 100, 1),
+        "viirs_codetection_lower_bound_pct": round(len(matched_viirs_unique) / max(len(viirs_df), 1) * 100, 1),
         "independent_days": int(pairs["date_str"].nunique()),
         "median_time_diff_min": round(float(pairs["median_time_diff_min"].median()), 1)
     }
     return pairs, summary
+
+def compute_detectability_curve(modis_df, viirs_df, max_dist_km=2.0, max_time_min=120.0, include_terra=False):
+    """
+    VIIRS FRP araliklarina gore 'MODIS (Aqua) bu tespiti gordu mu?' alt sinir oranini hesaplar.
+    Not: MODIS yorunge boslugu veya bulut nedeniyle o noktayi hic gormemis olabilecegi icin
+    bu oran gercek sensor hassasiyetinin GOZLENEN ALT SINIRIDIR (Observed Lower Bound).
+    """
+    if viirs_df.empty:
+        return pd.DataFrame()
+
+    v = viirs_df.copy().reset_index(drop=True)
+    v["viirs_idx"] = v.index
+
+    bins = [0, 5, 15, 30, 60, 150, np.inf]
+    labels = ["0–5 MW", "5–15 MW", "15–30 MW", "30–60 MW", "60–150 MW", "150+ MW"]
+    v["frp_bin"] = pd.cut(v["frp"], bins=bins, labels=labels, right=False)
+
+    matched_indices = set()
+    if not modis_df.empty:
+        sat_col = modis_df["satellite"].astype(str).str.upper()
+        target_modis = modis_df.copy() if include_terra else modis_df[sat_col.isin(["A", "AQUA"])].copy()
+        if not target_modis.empty:
+            merged = pd.merge(v, target_modis, on=["date_str"], suffixes=("_viirs", "_modis"))
+            if not merged.empty:
+                t_diff = (merged["observed_at_utc_viirs"] - merged["observed_at_utc_modis"]).abs().dt.total_seconds() / 60.0
+                dist = haversine_km(
+                    merged["latitude_viirs"].values, merged["longitude_viirs"].values,
+                    merged["latitude_modis"].values, merged["longitude_modis"].values
+                )
+                hit = merged[(dist <= max_dist_km) & (t_diff <= max_time_min)]
+                matched_indices = set(hit["viirs_idx"].unique())
+
+    v["modis_detected"] = v["viirs_idx"].isin(matched_indices)
+    curve = v.groupby("frp_bin", observed=False).agg(
+        total_viirs=("viirs_idx", "count"),
+        matched_modis=("modis_detected", "sum")
+    ).reset_index()
+    curve["lower_bound_rate_pct"] = np.where(
+        curve["total_viirs"] > 0,
+        (curve["matched_modis"] / curve["total_viirs"] * 100.0).round(1),
+        0.0
+    )
+    return curve
 
 def calibrate_frp_time_block(pairs_df):
     if pairs_df.empty or pairs_df["date_str"].nunique() < 3 or len(pairs_df) < 8:
